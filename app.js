@@ -79,25 +79,36 @@
    *    зашифрованном URI — расшифровка ключом pdkey из публичного кэша)
    * ================================================================================== */
   var SC_RESOLVE = 'https://go.xxxiijmp.com/api/models?modelsList=';
+  // Публичные CORS-прокси: пробуем по очереди, если прямой резолвер забанил IP.
+  var SC_PROXIES = ['https://corsproxy.io/?url=', 'https://api.allorigins.win/raw?url='];
   var SC_MASTER = 'https://edge-hls.doppiocdn.com/hls/'; // + {id}/master/{id}.m3u8
   var SC_KEYS_URL = 'https://raw.githubusercontent.com/kesamom/stripchat_mouflon/main/stripchat_mouflon_keys.json';
 
   var scCache = new Map();          // username -> { t, v:{online,id,previewUrl} }
   var mfKeys = null, mfKeysT = 0;   // кэш pkey->pdkey
 
+  // Резолв логин->id. Партнёрский резолвер go.xxxiijmp.com части IP отдаёт 500
+  // (бан сети). Тогда повторяем через публичный CORS-прокси — его IP не забанен.
+  function scFetchModels(username) {
+    var target = SC_RESOLVE + encodeURIComponent(username) + '&strict=1';
+    var urls = [target].concat(SC_PROXIES.map(function (p) { return p + encodeURIComponent(target); }));
+    return (function tryAt(i) {
+      return fetch(urls[i], { cache: 'no-store' })
+        .then(function (r) { if (!r.ok) throw new Error('s ' + r.status); return r.json(); })
+        .catch(function (e) { if (i + 1 < urls.length) return tryAt(i + 1); throw e; });
+    })(0);
+  }
   function scResolve(username) {
     var c = scCache.get(username);
     if (c && Date.now() - c.t < 10000) return Promise.resolve(c.v);
-    return fetch(SC_RESOLVE + encodeURIComponent(username) + '&strict=1', { cache: 'no-store' })
-      .then(function (r) { return r.json(); })
-      .then(function (j) {
-        var m = (j.models || [])[0];
-        var v = m
-          ? { online: true, id: m.id, previewUrl: m.previewUrl || m.snapshotUrl || m.previewUrlThumbBig }
-          : { online: false };
-        scCache.set(username, { t: Date.now(), v: v });
-        return v;
-      });
+    return scFetchModels(username).then(function (j) {
+      var m = (j.models || [])[0];
+      var v = m
+        ? { online: true, id: m.id, previewUrl: m.previewUrl || m.snapshotUrl || m.previewUrlThumbBig }
+        : { online: false };
+      scCache.set(username, { t: Date.now(), v: v });
+      return v;
+    });
   }
   function getMouflonKeys() {
     if (mfKeys && Date.now() - mfKeysT < 600000) return Promise.resolve(mfKeys);
