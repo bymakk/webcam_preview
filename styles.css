@@ -148,12 +148,11 @@ input[type=range] { accent-color: var(--accent); cursor: pointer; }
 .tile-state.hidden { display: none; }
 .tile-state .state-emoji { font-size: 26px; }
 
-/* Top badges (mode + platform + live) */
+/* Top badge (только режим: видео/фото) */
 .tile-top {
   position: absolute; top: 8px; left: 8px; right: 8px; z-index: 3;
   display: flex; align-items: center; gap: 6px; pointer-events: none;
 }
-.tile-top .spacer { flex: 1; }
 .badge {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 11px; font-weight: 700; letter-spacing: .3px;
@@ -169,15 +168,6 @@ input[type=range] { accent-color: var(--accent); cursor: pointer; }
 }
 .platform-badge.cb { background: var(--cb); color: #111; }
 .platform-badge.sc { background: var(--sc); }
-.live-dot {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11px; font-weight: 700;
-}
-.live-dot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--off); }
-.live-dot.online { color: #fff; }
-.live-dot.online::before { background: var(--ok); box-shadow: 0 0 8px var(--ok); animation: pulse 1.6s ease-in-out infinite; }
-.live-dot.offline { color: #cfd3da; }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 
 /* Hover overlay with model logins */
 .tile-overlay {

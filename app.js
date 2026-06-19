@@ -207,8 +207,6 @@
     this.model = model;
     this.media = refs.media;
     this.stateEl = refs.state;
-    this.dot = refs.dot;
-    this.note = refs.note;
     this.gen = 0;
     this.timer = null;
     this.embed = null;
@@ -380,17 +378,8 @@
     this.stateEl.innerHTML = s.html;
     this.stateEl.classList.remove('hidden');
   };
-  Preview.prototype.setLive = function (status) {
-    var d = this.dot;
-    d.classList.remove('online', 'offline');
-    if (status === 'online') { d.classList.add('online'); d.textContent = 'LIVE'; d.style.display = ''; }
-    else if (status === 'offline') { d.classList.add('offline'); d.textContent = 'OFF'; d.style.display = ''; }
-    else { d.textContent = ''; d.style.display = 'none'; } // неизвестно/загрузка -> скрываем
-  };
-  Preview.prototype.setNote = function (text) {
-    this.note.textContent = text || '';
-    this.note.style.display = text ? '' : 'none';
-  };
+  Preview.prototype.setLive = function () {}; // индикатор LIVE/OFF убран
+  Preview.prototype.setNote = function () {}; // плашка-заметка убрана
 
   /* =======================================================================
    *  Плитки / рендер
@@ -440,10 +429,6 @@
       '<div class="tile-state"></div>' +
       '<div class="tile-top">' +
         '<span class="badge mode"></span>' +
-        '<span class="badge plat"></span>' +
-        '<span class="badge note" style="display:none"></span>' +
-        '<span class="spacer"></span>' +
-        '<span class="live-dot" style="display:none"></span>' +
       '</div>' +
       '<div class="tile-overlay">' +
         '<div class="tile-logins"></div>' +
@@ -454,9 +439,7 @@
 
     var refs = {
       media: $('.tile-media', el),
-      state: $('.tile-state', el),
-      dot: $('.live-dot', el),
-      note: $('.badge.note', el)
+      state: $('.tile-state', el)
     };
     var ctrl = new Preview(m, refs);
     var entry = { el: el, ctrl: ctrl, sig: sigOf(m) };
@@ -469,15 +452,9 @@
   }
 
   function buildBadges(entry, m) {
-    var ap = activePlatform(m);
-    var modeEl = $('.badge.mode', entry.el);
-    modeEl.innerHTML = (m.mode === 'video' ? svg(ICON.video) + 'LIVE' : svg(ICON.img) + 'IMG');
+    var modeEl = $('.badge.mode', entry.el); // только индикатор режима (видео/фото)
+    modeEl.innerHTML = (m.mode === 'video' ? svg(ICON.video) + 'Видео' : svg(ICON.img) + 'Фото');
     modeEl.style.gap = '5px';
-    var platEl = $('.badge.plat', entry.el);
-    platEl.textContent = ap === 'chaturbate' ? 'CB' : 'SC';
-    platEl.style.color = ap === 'chaturbate' ? '#111' : '#fff';
-    platEl.style.background = ap === 'chaturbate' ? 'var(--cb)' : 'var(--sc)';
-    platEl.style.borderColor = 'transparent';
   }
 
   function buildOverlay(entry, m) {
