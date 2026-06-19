@@ -8,8 +8,6 @@
   <meta name="description" content="Мониторинг живых превью моделей Chaturbate и Stripchat. Плитки 16:9, перетаскивание, видео/картинка." />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23111'/%3E%3Ccircle cx='50' cy='42' r='18' fill='none' stroke='%23ff4d6d' stroke-width='7'/%3E%3Crect x='32' y='66' width='36' height='8' rx='4' fill='%23ff4d6d'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="styles.css" />
-  <!-- hls.js for video previews (loaded from CDN; only used in video mode) -->
-  <script defer src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
 </head>
 <body>
   <!-- ===================== Top toolbar ===================== -->
@@ -137,8 +135,8 @@
         </div>
 
         <div class="field">
-          <label for="set-proxy">URL прокси (Cloudflare Worker) — для видео и Stripchat</label>
-          <input type="text" id="set-proxy" placeholder="https://your-worker.workers.dev" spellcheck="false" />
+          <label for="set-proxy">URL прокси (необязательно) — только для точного статуса online/offline у Chaturbate</label>
+          <input type="text" id="set-proxy" placeholder="https://your-worker.workers.dev — можно оставить пустым" spellcheck="false" />
           <p class="field-hint" id="proxy-status"></p>
         </div>
 

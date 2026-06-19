@@ -66,6 +66,20 @@
   function cbSnapshotUrl(user, bust) {
     return 'https://thumb.live.mmcdn.com/riw/' + encodeURIComponent(user) + '.jpg?c=' + bust;
   }
+
+  // URL встроенного плеера-виджета (без прокси). Виджет принимает ЛОГИН напрямую,
+  // сам резолвит модель и проигрывает (для Stripchat — расшифровывает поток).
+  function embedUrl(platform, user, mode) {
+    var u = encodeURIComponent(user);
+    if (platform === 'stripchat') {
+      // autoplay=all -> видео; autoplay=none -> постер (режим «картинка»)
+      var ap = mode === 'video' ? 'all' : 'none';
+      return 'https://creative.mavrtracktor.com/widgets/Player?modelName=' + u +
+             '&autoplay=' + ap + '&volumeControl=0&fullscreen=0&muted=1';
+    }
+    // Chaturbate: официальный встраиваемый плеер (видео).
+    return 'https://chaturbate.com/embed/' + u + '/?disable_sound=1&mobileRedirect=never&campaign=';
+  }
   function livePageUrl(platform, user) {
     return platform === 'chaturbate'
       ? 'https://chaturbate.com/' + encodeURIComponent(user) + '/'
@@ -118,7 +132,7 @@
     this.note = refs.note;
     this.gen = 0;
     this.timer = null;
-    this.hls = null;
+    this.embed = null;
   }
   Preview.prototype.setModel = function (m) { this.model = m; };
   Preview.prototype.platform = function () {
@@ -132,29 +146,44 @@
     this.gen++;
     var g = this.gen;
     this.clearTimer();
-    this.destroyHls();
+    this.teardownEmbed();
     this.setNote('');
-    this.setLive(''); // сброс индикатора до реального статуса (не показываем устаревший LIVE/OFF)
-    if (this.model.mode === 'video') this.runVideo(g);
-    else this.runImage(g);
+    this.setLive(''); // сброс индикатора
+    // CB-картинка -> наш <img> (thumb.live). Всё остальное (видео, любой
+    // Stripchat) -> встроенный плеер-виджет в <iframe>: он сам резолвит логин
+    // и расшифровывает/проигрывает поток. Прокси не нужен.
+    if (this.platform() === 'chaturbate' && this.model.mode === 'image') this.runImage(g);
+    else this.mountEmbed();
   };
   Preview.prototype.stop = function () {
     this.gen++;
     this.clearTimer();
-    this.destroyHls();
+    this.teardownEmbed();
   };
   Preview.prototype.clearTimer = function () { if (this.timer) { clearTimeout(this.timer); this.timer = null; } };
-  Preview.prototype.destroyHls = function () {
-    if (this.hls) { try { this.hls.destroy(); } catch (e) {} this.hls = null; }
-    var v = this.media.querySelector('video');
-    if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {} }
+  Preview.prototype.teardownEmbed = function () {
+    var f = this.media.querySelector('iframe');
+    if (f) { try { f.src = 'about:blank'; } catch (e) {} f.remove(); }
+    this.embed = null;
+  };
+  // Встроенный плеер-виджет (iframe). В CSS у него pointer-events:none — поэтому
+  // наши hover/контекстное меню/drag работают поверх, а видео играет под ними.
+  Preview.prototype.mountEmbed = function () {
+    var src = embedUrl(this.platform(), this.user(), this.model.mode);
+    this.media.innerHTML = '';
+    var f = document.createElement('iframe');
+    f.className = 'tile-embed';
+    f.src = src;
+    f.setAttribute('allow', 'autoplay; encrypted-media; fullscreen');
+    f.setAttribute('scrolling', 'no');
+    this.media.appendChild(f);
+    this.embed = f;
+    this.hideState();
   };
 
-  /* ---- картинка ---- */
+  /* ---- картинка Chaturbate (thumb.live) ---- */
   Preview.prototype.runImage = function (g) {
-    var platform = this.platform(), user = this.user();
-    if (platform === 'chaturbate') this.loadCbImage(g, user);
-    else this.loadProxyImage(g, platform, user);
+    this.loadCbImage(g, this.user());
   };
   Preview.prototype.loadCbImage = function (g, user) {
     var self = this;
@@ -178,31 +207,6 @@
       if (self.gen === g) self.setLive(d.online ? 'online' : 'offline');
     }).catch(function () { if (self.gen === g) self.setLive(''); });
   };
-  Preview.prototype.loadProxyImage = function (g, platform, user) {
-    var self = this;
-    // force=false: используем 25s-кэш resolveCache, чтобы не дёргать прокси
-    // на каждом цикле. Ручное «Обновить» и сохранение настроек чистят кэш.
-    resolveFeed(platform, user, false).then(function (d) {
-      if (self.gen !== g) return;
-      self.setLive(d.online ? 'online' : 'offline');
-      if (d.imageUrl) {
-        var u = bust(d.imageUrl);
-        preload(u).then(function () {
-          if (self.gen !== g) return;
-          self.setImg(u); self.queue(g, PROXY_MIN_INTERVAL);
-        }).catch(function () {
-          if (self.gen !== g) return;
-          self.showState(d.online ? 'noimg' : 'offline'); self.queue(g, PROXY_MIN_INTERVAL);
-        });
-      } else {
-        self.showState(d.online ? 'noimg' : 'offline'); self.queue(g, PROXY_MIN_INTERVAL);
-      }
-    }).catch(function (err) {
-      if (self.gen !== g) return;
-      if (err.proxyNeeded) { self.showState('proxy'); }
-      else { self.showState('error'); self.queue(g, PROXY_MIN_INTERVAL); }
-    });
-  };
   Preview.prototype.queue = function (g, sec) {
     var self = this;
     this.clearTimer();
@@ -211,56 +215,6 @@
       if (self.gen !== g) return;
       self.runImage(g);
     }, ms);
-  };
-
-  /* ---- видео ---- */
-  Preview.prototype.runVideo = function (g) {
-    var self = this;
-    this.showState('loading');
-    var platform = this.platform(), user = this.user();
-    resolveFeed(platform, user, false).then(function (d) {
-      if (self.gen !== g) return;
-      self.setLive(d.online ? 'online' : 'offline');
-      if (d.online && d.hlsUrl) self.mountHls(g, d.hlsUrl);
-      else if (d.online) { self.setNote('видео недоступно'); self.runImage(g); }
-      else self.showState('offline');
-    }).catch(function (err) {
-      if (self.gen !== g) return;
-      if (err.proxyNeeded) self.showState('proxy');
-      else self.showState('error');
-    });
-  };
-  Preview.prototype.mountHls = function (g, src) {
-    var self = this;
-    this.media.innerHTML = '';
-    var video = document.createElement('video');
-    video.muted = true; video.autoplay = true; video.playsInline = true;
-    video.setAttribute('playsinline', ''); video.draggable = false;
-    this.media.appendChild(video);
-
-    function ok() { if (self.gen === g) { self.hideState(); video.play().catch(function () {}); } }
-    function fail() { if (self.gen === g) self.videoFallback(g); }
-
-    if (window.Hls && window.Hls.isSupported()) {
-      var hls = new window.Hls({ maxBufferLength: 12, liveSyncDurationCount: 3, enableWorker: true });
-      this.hls = hls;
-      hls.loadSource(src);
-      hls.attachMedia(video);
-      hls.on(window.Hls.Events.MANIFEST_PARSED, ok);
-      hls.on(window.Hls.Events.ERROR, function (e, data) { if (data && data.fatal) fail(); });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = src;
-      video.addEventListener('loadedmetadata', ok);
-      video.addEventListener('error', fail);
-    } else {
-      fail();
-    }
-  };
-  Preview.prototype.videoFallback = function (g) {
-    // видео упало -> показываем картинку, не меняя сохранённый режим
-    this.destroyHls();
-    this.setNote('видео недоступно — картинка');
-    this.runImage(g);
   };
 
   /* ---- отрисовка состояния ---- */
@@ -759,7 +713,7 @@
     setColsVal.textContent = settings.cols;
     setInterval.value = settings.interval;
     setProxy.value = settings.proxy || '';
-    proxyStatus.textContent = settings.proxy ? '' : 'Без прокси: работают только картинки Chaturbate.';
+    proxyStatus.textContent = settings.proxy ? '' : 'Прокси не нужен: видео и Stripchat работают через встроенный плеер.';
     settingsBackdrop.hidden = false;
   }
   function closeSettings() { settingsBackdrop.hidden = true; }
