@@ -240,6 +240,10 @@
   Preview.prototype.clearTimer = function () { if (this.timer) { clearTimeout(this.timer); this.timer = null; } };
   Preview.prototype.destroyHls = function () {
     if (this.hls) { try { this.hls.destroy(); } catch (e) {} this.hls = null; }
+    // Удаляем сам видеоэлемент, иначе при переключении видео->картинка он
+    // остаётся чёрным поверх новой картинки.
+    var v = this.media.querySelector('video');
+    if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {} v.remove(); }
   };
 
   /* ---- Stripchat видео: свой hls.js плеер ---- */
