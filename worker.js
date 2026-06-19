@@ -73,7 +73,8 @@ function sanitize(v) {
 /* ----------------------------- Chaturbate ----------------------------- */
 async function resolveChaturbate(user) {
   const page = `https://chaturbate.com/${user}/`;
-  const imageUrl = `https://jpeg.live.mmcdn.com/stream?room=${user}`;
+  // thumb.live — один кадр (а не MJPEG-поток jpeg.live/stream)
+  const imageUrl = `https://thumb.live.mmcdn.com/riw/${user}.jpg`;
 
   const res = await fetch('https://chaturbate.com/get_edge_hls_url_ajax/', {
     method: 'POST',

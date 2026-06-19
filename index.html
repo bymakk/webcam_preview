@@ -86,15 +86,16 @@
 
         <p class="field-hint">Можно заполнить одно поле или оба — если модель есть на обеих площадках.</p>
 
-        <div class="field-row">
-          <div class="field">
-            <label for="in-mode">Режим по умолчанию</label>
+        <!-- Выбор режима/площадки показывается только когда заполнены ОБЕ площадки -->
+        <div class="field-row" id="choice-row" hidden>
+          <div class="field" id="mode-wrap">
+            <label for="in-mode">Режим</label>
             <select id="in-mode" name="mode">
-              <option value="image">Картинка (обновляется)</option>
+              <option value="image">Картинка</option>
               <option value="video">Видео</option>
             </select>
           </div>
-          <div class="field" id="primary-wrap" hidden>
+          <div class="field" id="primary-wrap">
             <label for="in-primary">Показывать превью</label>
             <select id="in-primary" name="primary">
               <option value="chaturbate">Chaturbate</option>
@@ -102,6 +103,7 @@
             </select>
           </div>
         </div>
+        <p class="field-hint" id="mode-hint" hidden></p>
 
         <p class="form-error" id="form-error" hidden></p>
 

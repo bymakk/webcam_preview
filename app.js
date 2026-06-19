@@ -60,11 +60,11 @@
   /* =======================================================================
    *  Провайдеры превью
    * ==================================================================== */
-  function cbImageUrl(user, bust) {
-    return 'https://jpeg.live.mmcdn.com/stream?room=' + encodeURIComponent(user) + '&c=' + bust;
-  }
-  function cbThumbUrl(user) {
-    return 'https://thumb.live.mmcdn.com/riw/' + encodeURIComponent(user) + '.jpg';
+  // Снимок Chaturbate — ОДИН кадр. НЕ используем jpeg.live/stream: в реальном
+  // браузере это MJPEG-поток (~2 кадра/сек). thumb.live отдаёт один JPEG,
+  // который мы обновляем по таймеру с cache-bust — управляемая частота.
+  function cbSnapshotUrl(user, bust) {
+    return 'https://thumb.live.mmcdn.com/riw/' + encodeURIComponent(user) + '.jpg?c=' + bust;
   }
   function livePageUrl(platform, user) {
     return platform === 'chaturbate'
@@ -158,21 +158,25 @@
   };
   Preview.prototype.loadCbImage = function (g, user) {
     var self = this;
-    var url = cbImageUrl(user, Date.now());
+    var url = cbSnapshotUrl(user, Date.now());
     preload(url).then(function () {
       if (self.gen !== g) return;
-      self.setImg(url); self.setLive('online'); self.queue(g, settings.interval);
+      self.setImg(url);
+      self.updateCbStatus(g, user);
+      self.queue(g, settings.interval);
     }).catch(function () {
       if (self.gen !== g) return;
-      // запасной статичный thumbnail
-      preload(cbThumbUrl(user)).then(function () {
-        if (self.gen !== g) return;
-        self.setImg(cbThumbUrl(user)); self.setLive('unknown'); self.queue(g, settings.interval);
-      }).catch(function () {
-        if (self.gen !== g) return;
-        self.showState('offline'); self.setLive('offline'); self.queue(g, settings.interval);
-      });
+      self.showState('offline'); self.setLive('offline'); self.queue(g, settings.interval);
     });
+  };
+  // Точный статус Chaturbate берём из прокси (если задан). Без прокси thumb.live
+  // отдаёт 200 даже для оффлайна — статус не утверждаем, точку скрываем.
+  Preview.prototype.updateCbStatus = function (g, user) {
+    var self = this;
+    if (!proxyBase()) { self.setLive(''); return; }
+    resolveFeed('chaturbate', user, false).then(function (d) {
+      if (self.gen === g) self.setLive(d.online ? 'online' : 'offline');
+    }).catch(function () { if (self.gen === g) self.setLive(''); });
   };
   Preview.prototype.loadProxyImage = function (g, platform, user) {
     var self = this;
@@ -636,7 +640,8 @@
   var inSc = $('#in-stripchat');
   var inMode = $('#in-mode');
   var inPrimary = $('#in-primary');
-  var primaryWrap = $('#primary-wrap');
+  var choiceRow = $('#choice-row');
+  var modeHint = $('#mode-hint');
   var formError = $('#form-error');
 
   function openModal(id) {
@@ -646,21 +651,36 @@
     $('#modal-save').textContent = m ? 'Сохранить' : 'Добавить';
     inCb.value = m ? (m.chaturbate || '') : '';
     inSc.value = m ? (m.stripchat || '') : '';
-    inMode.value = m ? m.mode : settings.defaultMode;
+    inMode.value = m ? m.mode : 'image';
     inPrimary.value = m ? activePlatform(m) : 'chaturbate';
     formError.hidden = true;
-    updatePrimaryVisibility();
+    updateModalDynamics();
     modalBackdrop.hidden = false;
     setTimeout(function () { inCb.focus(); }, 30);
   }
   function closeModal() { modalBackdrop.hidden = true; editingId = null; }
 
-  function updatePrimaryVisibility() {
-    var both = cleanLogin(inCb.value) && cleanLogin(inSc.value);
-    primaryWrap.hidden = !both;
+  // Выбор режима/площадки — только при двух площадках. Для одной площадки
+  // режим определяется автоматически: Chaturbate → картинка, Stripchat → видео.
+  function updateModalDynamics() {
+    var cb = cleanLogin(inCb.value), sc = cleanLogin(inSc.value);
+    var both = cb && sc;
+    choiceRow.hidden = !both;
+    if (both) {
+      modeHint.hidden = true;
+    } else if (cb || sc) {
+      modeHint.hidden = false;
+      modeHint.textContent = cb ? 'Chaturbate → картинка' : 'Stripchat → видео';
+    } else {
+      modeHint.hidden = true;
+    }
   }
-  inCb.addEventListener('input', updatePrimaryVisibility);
-  inSc.addEventListener('input', updatePrimaryVisibility);
+  inCb.addEventListener('input', updateModalDynamics);
+  inSc.addEventListener('input', updateModalDynamics);
+  // при выборе площадки подставляем её режим по умолчанию (можно переопределить)
+  inPrimary.addEventListener('change', function () {
+    inMode.value = inPrimary.value === 'stripchat' ? 'video' : 'image';
+  });
 
   form.addEventListener('submit', function (e) {
     e.preventDefault();
@@ -671,10 +691,21 @@
       formError.hidden = false;
       return;
     }
-    var mode = inMode.value === 'video' ? 'video' : 'image';
-    var primary;
-    if (cb && sc) primary = inPrimary.value === 'stripchat' ? 'stripchat' : 'chaturbate';
-    else primary = cb ? 'chaturbate' : 'stripchat';
+    var m0 = editingId ? getModel(editingId) : null;
+    var mode, primary;
+    if (cb && sc) {
+      // обе площадки — выбор пользователя
+      primary = inPrimary.value === 'stripchat' ? 'stripchat' : 'chaturbate';
+      mode = inMode.value === 'video' ? 'video' : 'image';
+    } else {
+      // одна площадка: CB → картинка, SC → видео.
+      // При редактировании той же одиночной площадки сохраняем текущий режим
+      // (чтобы не сбрасывать выбор, сделанный через контекстное меню).
+      primary = cb ? 'chaturbate' : 'stripchat';
+      var hadBoth = m0 && m0.chaturbate && m0.stripchat;
+      var hadSame = m0 && !hadBoth && ((cb && m0.chaturbate) || (sc && m0.stripchat));
+      mode = hadSame ? m0.mode : (cb ? 'image' : 'video');
+    }
 
     if (editingId) {
       var m = getModel(editingId);
