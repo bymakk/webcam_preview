@@ -116,10 +116,17 @@
       .then(function (k) { mfKeys = k; mfKeysT = Date.now(); return k; })
       .catch(function () { return mfKeys || {}; });
   }
+  // SHA256(pdkey) кэшируем (один ключ на весь поток) — не считаем на каждый сегмент.
+  var mfHashCache = {};
+  function sha256Bytes(key) {
+    if (mfHashCache[key]) return Promise.resolve(mfHashCache[key]);
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(key)).then(function (b) {
+      var h = new Uint8Array(b); mfHashCache[key] = h; return h;
+    });
+  }
   // base64 -> XOR с SHA256(pdkey) -> utf8
   function mouflonDecrypt(b64, pdkey) {
-    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(pdkey)).then(function (hbuf) {
-      var hash = new Uint8Array(hbuf);
+    return sha256Bytes(pdkey).then(function (hash) {
       var s = String(b64).replace(/=+$/, ''); while (s.length % 4) s += '=';
       var bin = atob(s), out = new Uint8Array(bin.length);
       for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i) ^ hash[i % hash.length];
@@ -264,7 +271,13 @@
     var shared = { pkey: null, pdkey: null };
     var hls = new window.Hls({
       pLoader: makeScPLoader(shared, keys),
-      maxBufferLength: 10, liveSyncDurationCount: 3, manifestLoadingMaxRetry: 2
+      capLevelToPlayerSize: true,    // качество под размер плитки -> меньше нагрузка
+      maxBufferLength: 30,
+      backBufferLength: 10,
+      liveSyncDurationCount: 4,      // держимся подальше от живого края -> плавнее
+      liveMaxLatencyDurationCount: 15,
+      manifestLoadingMaxRetry: 2,
+      fragLoadingMaxRetry: 4
     });
     this.hls = hls;
     hls.loadSource(SC_MASTER + id + '/master/' + id + '.m3u8');
