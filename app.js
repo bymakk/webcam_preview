@@ -271,13 +271,20 @@
     var shared = { pkey: null, pdkey: null };
     var hls = new window.Hls({
       pLoader: makeScPLoader(shared, keys),
-      capLevelToPlayerSize: true,    // качество под размер плитки -> меньше нагрузка
-      maxBufferLength: 30,
-      backBufferLength: 10,
-      liveSyncDurationCount: 4,      // держимся подальше от живого края -> плавнее
-      liveMaxLatencyDurationCount: 15,
-      manifestLoadingMaxRetry: 2,
-      fragLoadingMaxRetry: 4
+      capLevelToPlayerSize: true,
+      // У Stripchat длина сегментов разная (2-8с), окно плейлиста маленькое.
+      // Отставание задаём в СЕКУНДАХ (не в сегментах!): держимся ~8с позади
+      // края — в пределах окна, поэтому сегменты грузятся строго по порядку,
+      // без перескоков. Перескок мимо окна = разрыв = двоение кадров на стыке.
+      liveSyncDuration: 8,
+      liveMaxLatencyDuration: 20,
+      maxLiveSyncPlaybackRate: 1,    // не ускоряемся, чтобы «догнать край» (без рывков)
+      maxBufferLength: 24,
+      backBufferLength: 30,
+      maxBufferHole: 0.5,            // мостим крошечные дыры, не делая полный сик
+      nudgeMaxRetry: 8,              // мелкие застревания подталкиваем, а не прыгаем
+      manifestLoadingMaxRetry: 4,
+      fragLoadingMaxRetry: 6
     });
     this.hls = hls;
     hls.loadSource(SC_MASTER + id + '/master/' + id + '.m3u8');
