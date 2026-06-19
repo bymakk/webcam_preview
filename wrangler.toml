@@ -1,7 +1,0 @@
-name = "webcam-preview-proxy"
-main = "worker.js"
-compatibility_date = "2024-11-01"
-
-# Деплой:  npx wrangler deploy
-# После деплоя скопируйте выданный URL (https://webcam-preview-proxy.<you>.workers.dev)
-# и вставьте его в дашборде: Настройки → URL прокси.
