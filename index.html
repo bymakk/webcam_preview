@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <title>Webcam Preview — мониторинг превью</title>
+  <meta name="description" content="Мониторинг живых превью моделей Chaturbate и Stripchat. Плитки 16:9, перетаскивание, видео/картинка." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23111'/%3E%3Ccircle cx='50' cy='42' r='18' fill='none' stroke='%23ff4d6d' stroke-width='7'/%3E%3Crect x='32' y='66' width='36' height='8' rx='4' fill='%23ff4d6d'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+  <!-- hls.js for video previews (loaded from CDN; only used in video mode) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+</head>
+<body>
+  <!-- ===================== Top toolbar ===================== -->
+  <header class="toolbar" id="toolbar">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span class="brand-name">Webcam<span class="brand-accent">Preview</span></span>
+      <span class="brand-count" id="model-count" title="Моделей">0</span>
+    </div>
+
+    <div class="toolbar-spacer"></div>
+
+    <div class="toolbar-controls">
+      <label class="cols-control" title="Колонок в сетке">
+        <svg viewBox="0 0 24 24" class="icon"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <input type="range" id="cols-range" min="1" max="8" step="1" value="4" />
+        <span class="cols-value" id="cols-value">4</span>
+      </label>
+
+      <button class="btn btn-ghost" id="btn-refresh" title="Обновить все превью">
+        <svg viewBox="0 0 24 24" class="icon"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+      </button>
+
+      <button class="btn btn-ghost" id="btn-settings" title="Настройки">
+        <svg viewBox="0 0 24 24" class="icon"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+
+      <button class="btn btn-primary" id="btn-add" title="Добавить модель">
+        <svg viewBox="0 0 24 24" class="icon"><path d="M12 5v14M5 12h14"/></svg>
+        <span>Добавить</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ===================== Grid of tiles ===================== -->
+  <main class="grid" id="grid"></main>
+
+  <!-- ===================== Empty state ===================== -->
+  <section class="empty" id="empty">
+    <button class="add-plus" id="add-plus" title="Добавить модель">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+    <h1>Добавьте модель</h1>
+    <p>Введите логин на <b>Chaturbate</b> и/или <b>Stripchat</b> — и здесь появится её живое превью.</p>
+  </section>
+
+  <!-- ===================== Context menu ===================== -->
+  <div class="context-menu" id="context-menu" hidden></div>
+
+  <!-- ===================== Add / Edit modal ===================== -->
+  <div class="modal-backdrop" id="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-head">
+        <h2 id="modal-title">Добавить модель</h2>
+        <button class="btn btn-icon" id="modal-close" title="Закрыть">
+          <svg viewBox="0 0 24 24" class="icon"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <form class="modal-body" id="model-form" autocomplete="off">
+        <div class="field">
+          <label for="in-chaturbate">
+            <span class="platform-badge cb">CB</span> Логин Chaturbate
+          </label>
+          <input type="text" id="in-chaturbate" name="chaturbate" placeholder="например, venus_in_jeans" spellcheck="false" />
+        </div>
+
+        <div class="field">
+          <label for="in-stripchat">
+            <span class="platform-badge sc">SC</span> Логин Stripchat
+          </label>
+          <input type="text" id="in-stripchat" name="stripchat" placeholder="например, _Mila_" spellcheck="false" />
+        </div>
+
+        <p class="field-hint">Можно заполнить одно поле или оба — если модель есть на обеих площадках.</p>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="in-mode">Режим по умолчанию</label>
+            <select id="in-mode" name="mode">
+              <option value="image">Картинка (обновляется)</option>
+              <option value="video">Видео</option>
+            </select>
+          </div>
+          <div class="field" id="primary-wrap" hidden>
+            <label for="in-primary">Показывать превью</label>
+            <select id="in-primary" name="primary">
+              <option value="chaturbate">Chaturbate</option>
+              <option value="stripchat">Stripchat</option>
+            </select>
+          </div>
+        </div>
+
+        <p class="form-error" id="form-error" hidden></p>
+
+        <div class="modal-foot">
+          <button type="button" class="btn btn-ghost" id="modal-cancel">Отмена</button>
+          <button type="submit" class="btn btn-primary" id="modal-save">Добавить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================== Settings modal ===================== -->
+  <div class="modal-backdrop" id="settings-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="modal-head">
+        <h2 id="settings-title">Настройки</h2>
+        <button class="btn btn-icon" id="settings-close" title="Закрыть">
+          <svg viewBox="0 0 24 24" class="icon"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <form class="modal-body" id="settings-form" autocomplete="off">
+        <div class="field">
+          <label for="set-cols">Колонок в сетке: <span id="set-cols-val">4</span></label>
+          <input type="range" id="set-cols" min="1" max="8" step="1" value="4" />
+        </div>
+
+        <div class="field">
+          <label for="set-interval">Интервал обновления картинки (сек)</label>
+          <input type="number" id="set-interval" min="2" max="120" step="1" value="5" />
+        </div>
+
+        <div class="field">
+          <label for="set-proxy">URL прокси (Cloudflare Worker) — для видео и Stripchat</label>
+          <input type="text" id="set-proxy" placeholder="https://your-worker.workers.dev" spellcheck="false" />
+          <p class="field-hint" id="proxy-status"></p>
+        </div>
+
+        <div class="field-row">
+          <button type="button" class="btn btn-ghost danger" id="set-export">Экспорт</button>
+          <button type="button" class="btn btn-ghost" id="set-import">Импорт</button>
+          <button type="button" class="btn btn-ghost danger" id="set-clear">Очистить всё</button>
+        </div>
+
+        <div class="modal-foot">
+          <button type="button" class="btn btn-ghost" id="settings-cancel">Закрыть</button>
+          <button type="submit" class="btn btn-primary">Сохранить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <input type="file" id="import-file" accept="application/json" hidden />
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

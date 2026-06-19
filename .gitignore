@@ -1,0 +1,13 @@
+# Local tooling / editor
+.claude/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (only relevant if you use wrangler locally)
+node_modules/
+.wrangler/
+npm-debug.log*
