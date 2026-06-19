@@ -13,6 +13,7 @@
 
   /* ----------------------------- Константы ------------------------------ */
   var STORAGE_KEY = 'webcam_preview_v1';
+  var CB_VIDEO_INTERVAL_MS = 150;   // «видео» Chaturbate = частый опрос кадров (~6-7 fps)
 
   var DEFAULTS = {
     settings: { cols: 4, intervalMs: 500, defaultMode: 'image' },
@@ -63,19 +64,13 @@
   function cbStreamUrl(user, seq) {
     return 'https://jpeg.live.mmcdn.com/stream?room=' + encodeURIComponent(user) + '&c=' + seq;
   }
-  // URL встроенного плеера-виджета (без прокси). Виджет принимает ЛОГИН напрямую,
-  // сам резолвит модель и проигрывает (для Stripchat — расшифровывает поток).
-  function embedUrl(platform, user, mode) {
-    var u = encodeURIComponent(user);
-    if (platform === 'stripchat') {
-      // strict=1 -> показывать ТОЛЬКО эту модель (без подмены на «промо» модель).
-      // autoplay=all -> видео; autoplay=none -> постер (режим «картинка»).
-      var ap = mode === 'video' ? 'all' : 'none';
-      return 'https://creative.mavrtracktor.com/widgets/Player?modelName=' + u +
-             '&strict=1&autoplay=' + ap + '&volumeControl=0&fullscreen=0&muted=1';
-    }
-    // Chaturbate: официальный встраиваемый плеер (видео).
-    return 'https://chaturbate.com/embed/' + u + '/?disable_sound=1&mobileRedirect=never&campaign=';
+  // URL встроенного плеера-виджета Stripchat (без прокси). Принимает ЛОГИН
+  // напрямую, сам резолвит модель и расшифровывает поток.
+  // strict=1 -> только эта модель (без подмены на «промо»). autoplay none=постер.
+  function embedUrl(user, mode) {
+    var ap = mode === 'video' ? 'all' : 'none';
+    return 'https://creative.mavrtracktor.com/widgets/Player?modelName=' + encodeURIComponent(user) +
+           '&strict=1&autoplay=' + ap + '&volumeControl=0&fullscreen=0&muted=1';
   }
   function livePageUrl(platform, user) {
     return platform === 'chaturbate'
@@ -121,10 +116,11 @@
     this.teardownEmbed();
     this.setNote('');
     this.setLive(''); // сброс индикатора
-    // CB-картинка -> наш <img> (быстрый поток jpeg.live). Всё остальное (видео,
-    // любой Stripchat) -> встроенный плеер-виджет в <iframe>: он сам резолвит
-    // логин и расшифровывает/проигрывает поток. Прокси не нужен.
-    if (this.platform() === 'chaturbate' && this.model.mode === 'image') this.runImage(g);
+    // Chaturbate -> поток JPEG-кадров (jpeg.live). «Видео» = просто высокий fps;
+    // встроенный плеер CB не годится (заставка 18+ из-за блокировки сторонних
+    // cookie в iframe). Stripchat -> встроенный плеер-виджет (сам резолвит логин
+    // и расшифровывает поток). Прокси не нужен.
+    if (this.platform() === 'chaturbate') this.runImage(g);
     else this.mountEmbed();
   };
   Preview.prototype.stop = function () {
@@ -142,7 +138,7 @@
   // наши hover/контекстное меню/drag работают поверх, а видео играет под ними.
   Preview.prototype.mountEmbed = function () {
     var self = this;
-    var src = embedUrl(this.platform(), this.user(), this.model.mode);
+    var src = embedUrl(this.user(), this.model.mode);
     this.media.innerHTML = '';
     var f = document.createElement('iframe');
     f.className = 'tile-embed';
@@ -165,10 +161,11 @@
   };
   Preview.prototype.tick = function (g) {
     var self = this;
-    // Следующий опрос — строго через intervalMs, НЕ дожидаясь загрузки кадра.
-    // Частота держится ~1/intervalMs независимо от времени загрузки.
+    // Следующий опрос — строго через интервал, НЕ дожидаясь загрузки кадра.
+    // «Видео» = высокий fps, «картинка» = настраиваемый период.
     this.clearTimer();
-    this.timer = setTimeout(function () { if (self.gen === g) self.tick(g); }, settings.intervalMs || 500);
+    var ms = this.model.mode === 'video' ? CB_VIDEO_INTERVAL_MS : (settings.intervalMs || 500);
+    this.timer = setTimeout(function () { if (self.gen === g) self.tick(g); }, ms);
     var seq = ++this.frameSeq;
     var img = new Image();
     img.draggable = false; img.alt = '';
