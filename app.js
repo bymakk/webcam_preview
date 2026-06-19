@@ -46,7 +46,7 @@
       var data = JSON.parse(raw);
       return {
         settings: Object.assign({}, DEFAULTS.settings, data.settings || {}),
-        models: Array.isArray(data.models) ? data.models : []
+        models: (Array.isArray(data.models) ? data.models : []).map(normalizeModel)
       };
     } catch (e) { return clone(DEFAULTS); }
   }
@@ -215,10 +215,10 @@
     this.frameSeq = 0;
   }
   Preview.prototype.setModel = function (m) { this.model = m; };
+  // Режим однозначно задаёт площадку: КАРТИНКА = Chaturbate (jpeg.live),
+  // ВИДЕО = Stripchat (hls). Картинка без CB и видео без SC невозможны.
   Preview.prototype.platform = function () {
-    var m = this.model;
-    if (m.primary && m[m.primary]) return m.primary;
-    return m.chaturbate ? 'chaturbate' : 'stripchat';
+    return this.model.mode === 'video' ? 'stripchat' : 'chaturbate';
   };
   Preview.prototype.user = function () { return this.model[this.platform()]; };
 
@@ -229,12 +229,10 @@
     this.destroyHls();
     this.setNote('');
     this.setLive(''); // сброс индикатора
-    // Chaturbate -> поток JPEG-кадров (jpeg.live; «видео» = высокий fps).
-    // Stripchat -> свой плеер: видео через hls.js (с расшифровкой Mouflon),
-    // картинка — снимок previewUrl. Всё без прокси и без партнёрского виджета.
-    if (this.platform() === 'chaturbate') this.runImage(g);
-    else if (this.model.mode === 'video') this.runScVideo(g);
-    else this.runScImage(g);
+    // Видео -> Stripchat (свой hls.js плеер с расшифровкой Mouflon).
+    // Картинка -> Chaturbate (поток JPEG-кадров jpeg.live). Всё без прокси.
+    if (this.model.mode === 'video') this.runScVideo(g);
+    else this.runImage(g);
   };
   Preview.prototype.stop = function () {
     this.gen++;
@@ -418,10 +416,17 @@
     return arr;
   }
   function activePlatform(m) {
-    if (m.primary && m[m.primary]) return m.primary;
-    return m.chaturbate ? 'chaturbate' : 'stripchat';
+    return m.mode === 'video' ? 'stripchat' : 'chaturbate'; // картинка=CB, видео=SC
   }
-  function sigOf(m) { return m.mode + '|' + (m.primary || '') + '|' + (m.chaturbate || '') + '|' + (m.stripchat || ''); }
+  // Режим должен соответствовать логинам: нет SC -> картинка, нет CB -> видео.
+  function normalizeModel(m) {
+    if (!m.stripchat) m.mode = 'image';
+    else if (!m.chaturbate) m.mode = 'video';
+    else if (m.mode !== 'video' && m.mode !== 'image') m.mode = 'image';
+    m.primary = m.mode === 'video' ? 'stripchat' : 'chaturbate';
+    return m;
+  }
+  function sigOf(m) { return m.mode + '|' + (m.chaturbate || '') + '|' + (m.stripchat || ''); }
 
   function createTile(m) {
     var el = document.createElement('div');
@@ -616,26 +621,18 @@
     ctxModelId = id;
     markMenuOpen(id, true);
 
-    var items = [];
-    items.push({ label: 'Режим', header: true });
-    items.push({ icon: ICON.img, label: 'Картинка', check: m.mode === 'image', act: function () { setMode(id, 'image'); } });
-    items.push({ icon: ICON.video, label: 'Видео', check: m.mode === 'video', act: function () { setMode(id, 'video'); } });
-
     var plats = platformList(m);
-    if (plats.length > 1) {
+    var items = [];
+    // Картинка доступна только при логине Chaturbate, видео — только при Stripchat.
+    if (m.chaturbate && m.stripchat) {
+      items.push({ label: 'Режим', header: true });
+      items.push({ icon: ICON.img, label: 'Картинка (CB)', check: m.mode === 'image', act: function () { setMode(id, 'image'); } });
+      items.push({ icon: ICON.video, label: 'Видео (SC)', check: m.mode === 'video', act: function () { setMode(id, 'video'); } });
       items.push({ sep: true });
-      items.push({ label: 'Показывать превью', header: true });
-      plats.forEach(function (it) {
-        items.push({
-          icon: ICON.swap, label: it.p === 'chaturbate' ? 'Chaturbate' : 'Stripchat',
-          check: activePlatform(m) === it.p, act: function () { setPrimary(id, it.p); }
-        });
-      });
     }
 
     var idx = state.models.findIndex(function (mm) { return mm.id === id; });
     var last = state.models.length - 1;
-    items.push({ sep: true });
     items.push({ icon: ICON.left, label: 'Сдвинуть влево', disabled: idx <= 0, act: function () { moveModel(id, -1); } });
     items.push({ icon: ICON.right, label: 'Сдвинуть вправо', disabled: idx >= last, act: function () { moveModel(id, 1); } });
 
@@ -707,12 +704,12 @@
   function getModel(id) { return state.models.find(function (m) { return m.id === id; }); }
   function setMode(id, mode) {
     var m = getModel(id); if (!m) return;
-    m.mode = mode; save();
-    updateTile(tiles.get(id), m);
-  }
-  function setPrimary(id, p) {
-    var m = getModel(id); if (!m) return;
-    m.primary = p; save();
+    // картинка возможна только с CB, видео — только с SC
+    if (mode === 'image' && !m.chaturbate) return;
+    if (mode === 'video' && !m.stripchat) return;
+    m.mode = mode;
+    normalizeModel(m);
+    save();
     updateTile(tiles.get(id), m);
   }
   function removeModel(id) {
@@ -732,7 +729,6 @@
   var inCb = $('#in-chaturbate');
   var inSc = $('#in-stripchat');
   var inMode = $('#in-mode');
-  var inPrimary = $('#in-primary');
   var choiceRow = $('#choice-row');
   var modeHint = $('#mode-hint');
   var formError = $('#form-error');
@@ -745,7 +741,6 @@
     inCb.value = m ? (m.chaturbate || '') : '';
     inSc.value = m ? (m.stripchat || '') : '';
     inMode.value = m ? m.mode : 'image';
-    inPrimary.value = m ? activePlatform(m) : 'chaturbate';
     formError.hidden = true;
     updateModalDynamics();
     modalBackdrop.hidden = false;
@@ -753,8 +748,8 @@
   }
   function closeModal() { modalBackdrop.hidden = true; editingId = null; }
 
-  // Выбор режима/площадки — только при двух площадках. Для одной площадки
-  // режим определяется автоматически: Chaturbate → картинка, Stripchat → видео.
+  // Выбор режима — только при ДВУХ площадках (картинка = CB, видео = SC).
+  // Для одной площадки режим определяется автоматически.
   function updateModalDynamics() {
     var cb = cleanLogin(inCb.value), sc = cleanLogin(inSc.value);
     var both = cb && sc;
@@ -770,10 +765,6 @@
   }
   inCb.addEventListener('input', updateModalDynamics);
   inSc.addEventListener('input', updateModalDynamics);
-  // при выборе площадки подставляем её режим по умолчанию (можно переопределить)
-  inPrimary.addEventListener('change', function () {
-    inMode.value = inPrimary.value === 'stripchat' ? 'video' : 'image';
-  });
 
   form.addEventListener('submit', function (e) {
     e.preventDefault();
@@ -784,21 +775,9 @@
       formError.hidden = false;
       return;
     }
-    var m0 = editingId ? getModel(editingId) : null;
-    var mode, primary;
-    if (cb && sc) {
-      // обе площадки — выбор пользователя
-      primary = inPrimary.value === 'stripchat' ? 'stripchat' : 'chaturbate';
-      mode = inMode.value === 'video' ? 'video' : 'image';
-    } else {
-      // одна площадка: CB → картинка, SC → видео.
-      // При редактировании той же одиночной площадки сохраняем текущий режим
-      // (чтобы не сбрасывать выбор, сделанный через контекстное меню).
-      primary = cb ? 'chaturbate' : 'stripchat';
-      var hadBoth = m0 && m0.chaturbate && m0.stripchat;
-      var hadSame = m0 && !hadBoth && ((cb && m0.chaturbate) || (sc && m0.stripchat));
-      mode = hadSame ? m0.mode : (cb ? 'image' : 'video');
-    }
+    // Картинка = CB, Видео = SC. При двух площадках режим выбирает пользователь,
+    // при одной — определяется автоматически (гарантирует normalizeModel).
+    var mode = (cb && sc) ? (inMode.value === 'video' ? 'video' : 'image') : (cb ? 'image' : 'video');
 
     if (editingId) {
       var m = getModel(editingId);
@@ -806,16 +785,15 @@
         m.chaturbate = cb || null;
         m.stripchat = sc || null;
         m.mode = mode;
-        m.primary = primary;
+        normalizeModel(m);
         save();
         updateTile(tiles.get(editingId), m);
       }
       toast('Сохранено');
     } else {
-      state.models.push({
-        id: uid(), chaturbate: cb || null, stripchat: sc || null,
-        mode: mode, primary: primary
-      });
+      state.models.push(normalizeModel({
+        id: uid(), chaturbate: cb || null, stripchat: sc || null, mode: mode
+      }));
       save();
       render();
       toast('Модель добавлена');

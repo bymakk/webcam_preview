@@ -7,7 +7,7 @@
   <title>Webcam Preview — мониторинг превью</title>
   <meta name="description" content="Мониторинг живых превью моделей Chaturbate и Stripchat. Плитки 16:9, перетаскивание, видео/картинка." />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23111'/%3E%3Ccircle cx='50' cy='42' r='18' fill='none' stroke='%23ff4d6d' stroke-width='7'/%3E%3Crect x='32' y='66' width='36' height='8' rx='4' fill='%23ff4d6d'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="styles.css?v=8" />
+  <link rel="stylesheet" href="styles.css?v=9" />
   <!-- hls.js — для собственного плеера Stripchat (расшифровка Mouflon в кастомном загрузчике) -->
   <script defer src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
 </head>
@@ -86,20 +86,13 @@
 
         <p class="field-hint">Можно заполнить одно поле или оба — если модель есть на обеих площадках.</p>
 
-        <!-- Выбор режима/площадки показывается только когда заполнены ОБЕ площадки -->
+        <!-- Режим показывается только когда заполнены ОБЕ площадки -->
         <div class="field-row" id="choice-row" hidden>
           <div class="field" id="mode-wrap">
             <label for="in-mode">Режим</label>
             <select id="in-mode" name="mode">
-              <option value="image">Картинка</option>
-              <option value="video">Видео</option>
-            </select>
-          </div>
-          <div class="field" id="primary-wrap">
-            <label for="in-primary">Показывать превью</label>
-            <select id="in-primary" name="primary">
-              <option value="chaturbate">Chaturbate</option>
-              <option value="stripchat">Stripchat</option>
+              <option value="image">Картинка (Chaturbate)</option>
+              <option value="video">Видео (Stripchat)</option>
             </select>
           </div>
         </div>
@@ -154,6 +147,6 @@
 
   <div class="toast" id="toast" hidden></div>
 
-  <script src="app.js?v=8"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>
