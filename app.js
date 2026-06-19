@@ -64,27 +64,122 @@
   function cbStreamUrl(user, seq) {
     return 'https://jpeg.live.mmcdn.com/stream?room=' + encodeURIComponent(user) + '&c=' + seq;
   }
-  // URL встроенного плеера-виджета Stripchat (без прокси). Принимает ЛОГИН
-  // напрямую, сам резолвит модель и расшифровывает поток.
-  // strict=1 -> только эта модель (без подмены на «промо»). autoplay none=постер.
-  function embedUrl(user, mode) {
-    var ap = mode === 'video' ? 'all' : 'none';
-    return 'https://creative.mavrtracktor.com/widgets/Player?modelName=' + encodeURIComponent(user) +
-           '&strict=1&autoplay=' + ap + '&volumeControl=0&fullscreen=0&muted=1';
-  }
   function livePageUrl(platform, user) {
     return platform === 'chaturbate'
       ? 'https://chaturbate.com/' + encodeURIComponent(user) + '/'
       : 'https://stripchat.com/' + encodeURIComponent(user);
   }
 
-  // Разнос загрузки iframe-виджетов во времени (анти-всплеск для сервера виджета).
-  var _embedBurst = 0, _embedBurstTimer = null;
-  function embedStaggerDelay() {
-    _embedBurst++;
-    if (_embedBurstTimer) clearTimeout(_embedBurstTimer);
-    _embedBurstTimer = setTimeout(function () { _embedBurst = 0; }, 1200);
-    return Math.min((_embedBurst - 1) * 200, 3000);
+  /* ===================== Stripchat: свой плеер, без прокси/виджета =====================
+   * 1) логин -> id + превью (go.xxxiijmp.com, CORS открыт)
+   * 2) мастер-плейлист doppiocdn (CORS *) -> pkey
+   * 3) вариант + ?psch=v2&pkey -> живой плейлист; реальные сегменты в
+   *    строках #EXT-X-MOUFLON:URI (видимые .mp4 — обманки)
+   * 4) играем в hls.js с кастомным загрузчиком (подмена сегментов; при
+   *    зашифрованном URI — расшифровка ключом pdkey из публичного кэша)
+   * ================================================================================== */
+  var SC_RESOLVE = 'https://go.xxxiijmp.com/api/models?modelsList=';
+  var SC_MASTER = 'https://edge-hls.doppiocdn.com/hls/'; // + {id}/master/{id}.m3u8
+  var SC_KEYS_URL = 'https://raw.githubusercontent.com/kesamom/stripchat_mouflon/main/stripchat_mouflon_keys.json';
+
+  var scCache = new Map();          // username -> { t, v:{online,id,previewUrl} }
+  var mfKeys = null, mfKeysT = 0;   // кэш pkey->pdkey
+
+  function scResolve(username) {
+    var c = scCache.get(username);
+    if (c && Date.now() - c.t < 10000) return Promise.resolve(c.v);
+    return fetch(SC_RESOLVE + encodeURIComponent(username) + '&strict=1', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var m = (j.models || [])[0];
+        var v = m
+          ? { online: true, id: m.id, previewUrl: m.previewUrl || m.snapshotUrl || m.previewUrlThumbBig }
+          : { online: false };
+        scCache.set(username, { t: Date.now(), v: v });
+        return v;
+      });
+  }
+  function getMouflonKeys() {
+    if (mfKeys && Date.now() - mfKeysT < 600000) return Promise.resolve(mfKeys);
+    return fetch(SC_KEYS_URL, { cache: 'no-store' }).then(function (r) { return r.json(); })
+      .then(function (k) { mfKeys = k; mfKeysT = Date.now(); return k; })
+      .catch(function () { return mfKeys || {}; });
+  }
+  // base64 -> XOR с SHA256(pdkey) -> utf8
+  function mouflonDecrypt(b64, pdkey) {
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(pdkey)).then(function (hbuf) {
+      var hash = new Uint8Array(hbuf);
+      var s = String(b64).replace(/=+$/, ''); while (s.length % 4) s += '=';
+      var bin = atob(s), out = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i) ^ hash[i % hash.length];
+      return new TextDecoder().decode(out);
+    });
+  }
+  // Реальный URL сегмента: предпоследний компонент (между '_') в #EXT-X-MOUFLON:URI
+  // реверсим и расшифровываем (base64 + XOR SHA256(pdkey)), подставляем обратно.
+  function decodeMouflonUri(uri, pdkey) {
+    if (!pdkey) return Promise.resolve(uri);
+    var parts = uri.split('_');
+    if (parts.length < 2) return Promise.resolve(uri);
+    var enc = parts[parts.length - 2];
+    return mouflonDecrypt(enc.split('').reverse().join(''), pdkey)
+      .then(function (dec) { return dec ? uri.replace(enc, dec) : uri; })
+      .catch(function () { return uri; });
+  }
+  // Подменяем строки-обманки (media.mp4) реальными расшифрованными URL сегментов.
+  function rewriteMediaPlaylist(text, pdkey) {
+    var lines = text.split('\n'), idx = [];
+    for (var i = 0; i < lines.length; i++) {
+      var m = lines[i].match(/^#EXT-X-MOUFLON:URI:(.*)$/);
+      if (m) idx.push({ i: i, uri: m[1].trim() });
+    }
+    var real = {}, p = Promise.resolve();
+    idx.forEach(function (it) {
+      p = p.then(function () { return decodeMouflonUri(it.uri, pdkey).then(function (u) { real[it.i] = u; }); });
+    });
+    return p.then(function () {
+      var out = [], pending = null;
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        if (/^#EXT-X-MOUFLON:URI:/.test(line)) { pending = real[i] || null; continue; }
+        if (pending && /^https?:\/\//.test(line.trim())) { out.push(pending); pending = null; continue; }
+        out.push(line);
+      }
+      return out.join('\n');
+    });
+  }
+  // Кастомный загрузчик плейлистов для hls.js: добавляет psch/pkey к медиа-плейлистам
+  // и переписывает сегменты. pkey берём из мастера, pdkey — из кэша.
+  function makeScPLoader(shared, keys) {
+    var Base = window.Hls.DefaultConfig.loader;
+    function ScPLoader(cfg) { this.base = new Base(cfg); }
+    ScPLoader.prototype.load = function (context, config, callbacks) {
+      if (context.type === 'level' && shared.pkey && context.url.indexOf('psch=') < 0) {
+        context.url += (context.url.indexOf('?') >= 0 ? '&' : '?') + 'psch=v2&pkey=' + encodeURIComponent(shared.pkey);
+      }
+      var onSuccess = callbacks.onSuccess;
+      callbacks.onSuccess = function (response, stats, ctx, net) {
+        var d = response.data;
+        if (typeof d === 'string' && d.indexOf('#EXT-X-STREAM-INF') >= 0) {
+          var found = (d.match(/PSCH:v2:([A-Za-z0-9]+)/g) || []).map(function (s) { return s.split(':').pop(); });
+          shared.pkey = found.filter(function (k) { return keys[k]; })[0] || found[0] || shared.pkey;
+          shared.pdkey = shared.pkey ? keys[shared.pkey] : null;
+        }
+        if (typeof d === 'string' && d.indexOf('#EXT-X-MOUFLON:URI:') >= 0) {
+          rewriteMediaPlaylist(d, shared.pdkey).then(function (fixed) {
+            response.data = fixed; onSuccess(response, stats, ctx, net);
+          });
+          return;
+        }
+        onSuccess(response, stats, ctx, net);
+      };
+      this.base.load(context, config, callbacks);
+    };
+    ScPLoader.prototype.abort = function () { this.base.abort(); };
+    ScPLoader.prototype.destroy = function () { this.base.destroy(); };
+    Object.defineProperty(ScPLoader.prototype, 'stats', { get: function () { return this.base.stats; } });
+    Object.defineProperty(ScPLoader.prototype, 'context', { get: function () { return this.base.context; } });
+    return ScPLoader;
   }
 
   /* =======================================================================
@@ -113,45 +208,85 @@
     this.gen++;
     var g = this.gen;
     this.clearTimer();
-    this.teardownEmbed();
+    this.destroyHls();
     this.setNote('');
     this.setLive(''); // сброс индикатора
-    // Chaturbate -> поток JPEG-кадров (jpeg.live). «Видео» = просто высокий fps;
-    // встроенный плеер CB не годится (заставка 18+ из-за блокировки сторонних
-    // cookie в iframe). Stripchat -> встроенный плеер-виджет (сам резолвит логин
-    // и расшифровывает поток). Прокси не нужен.
+    // Chaturbate -> поток JPEG-кадров (jpeg.live; «видео» = высокий fps).
+    // Stripchat -> свой плеер: видео через hls.js (с расшифровкой Mouflon),
+    // картинка — снимок previewUrl. Всё без прокси и без партнёрского виджета.
     if (this.platform() === 'chaturbate') this.runImage(g);
-    else this.mountEmbed();
+    else if (this.model.mode === 'video') this.runScVideo(g);
+    else this.runScImage(g);
   };
   Preview.prototype.stop = function () {
     this.gen++;
     this.clearTimer();
-    this.teardownEmbed();
+    this.destroyHls();
   };
   Preview.prototype.clearTimer = function () { if (this.timer) { clearTimeout(this.timer); this.timer = null; } };
-  Preview.prototype.teardownEmbed = function () {
-    var f = this.media.querySelector('iframe');
-    if (f) { try { f.src = 'about:blank'; } catch (e) {} f.remove(); }
-    this.embed = null;
+  Preview.prototype.destroyHls = function () {
+    if (this.hls) { try { this.hls.destroy(); } catch (e) {} this.hls = null; }
   };
-  // Встроенный плеер-виджет (iframe). В CSS у него pointer-events:none — поэтому
-  // наши hover/контекстное меню/drag работают поверх, а видео играет под ними.
-  Preview.prototype.mountEmbed = function () {
-    var self = this;
-    var src = embedUrl(this.user(), this.model.mode);
-    this.media.innerHTML = '';
-    var f = document.createElement('iframe');
-    f.className = 'tile-embed';
-    f.setAttribute('allow', 'autoplay; encrypted-media; fullscreen');
-    f.setAttribute('scrolling', 'no');
-    f.addEventListener('load', function () { if (self.embed === f) self.hideState(); });
-    this.media.appendChild(f);
-    this.embed = f;
+
+  /* ---- Stripchat видео: свой hls.js плеер ---- */
+  Preview.prototype.runScVideo = function (g) {
+    var self = this, user = this.user();
     this.showState('loading');
-    // Грузим с небольшим разносом во времени: при множестве плиток не бомбим
-    // сервер виджета одновременно (это вызывало редкие 500).
-    this.clearTimer();
-    this.timer = setTimeout(function () { if (self.embed === f) f.src = src; }, embedStaggerDelay());
+    scResolve(user).then(function (d) {
+      if (self.gen !== g) return;
+      if (!d.online || !d.id) { self.setLive('offline'); self.showState('offline'); return; }
+      self.setLive('online');
+      getMouflonKeys().then(function (keys) { if (self.gen === g) self.mountHls(g, d.id, keys); });
+    }).catch(function () { if (self.gen === g) { self.setLive('offline'); self.showState('error'); } });
+  };
+  Preview.prototype.mountHls = function (g, id, keys) {
+    var self = this;
+    if (!window.Hls || !window.Hls.isSupported()) { // iOS Safari и т.п. -> картинка
+      this.setNote('видео не поддерживается — картинка'); this.runScImage(g); return;
+    }
+    this.media.innerHTML = '';
+    var video = document.createElement('video');
+    video.muted = true; video.autoplay = true; video.playsInline = true;
+    video.setAttribute('playsinline', ''); video.draggable = false;
+    video.addEventListener('canplay', function () { video.play().catch(function () {}); });
+    this.media.appendChild(video);
+    var shared = { pkey: null, pdkey: null };
+    var hls = new window.Hls({
+      pLoader: makeScPLoader(shared, keys),
+      maxBufferLength: 10, liveSyncDurationCount: 3, manifestLoadingMaxRetry: 2
+    });
+    this.hls = hls;
+    hls.loadSource(SC_MASTER + id + '/master/' + id + '.m3u8');
+    hls.attachMedia(video);
+    hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
+      if (self.gen === g) { self.hideState(); video.play().catch(function () {}); }
+    });
+    hls.on(window.Hls.Events.ERROR, function (e, data) {
+      if (!data || !data.fatal) return;
+      if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) { try { hls.startLoad(); } catch (x) {} }
+      else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) { try { hls.recoverMediaError(); } catch (x) {} }
+      else { self.destroyHls(); if (self.gen === g) { self.setNote('видео недоступно — картинка'); self.runScImage(g); } }
+    });
+  };
+
+  /* ---- Stripchat картинка: снимок previewUrl (без прокси) ---- */
+  Preview.prototype.runScImage = function (g) {
+    var self = this, user = this.user();
+    scResolve(user).then(function (d) {
+      if (self.gen !== g) return;
+      self.setLive(d.online ? 'online' : 'offline');
+      if (d.online && d.previewUrl) {
+        var url = d.previewUrl + (d.previewUrl.indexOf('?') >= 0 ? '&' : '?') + 'c=' + Date.now();
+        var img = new Image(); img.draggable = false; img.alt = '';
+        img.onload = function () { if (self.gen === g) { self.swapFrame(img); self.scheduleSc(g); } };
+        img.onerror = function () { if (self.gen === g) self.scheduleSc(g); };
+        img.src = url;
+      } else { self.showState('offline'); self.scheduleSc(g); }
+    }).catch(function () { if (self.gen === g) { self.showState('error'); self.scheduleSc(g); } });
+  };
+  Preview.prototype.scheduleSc = function (g) {
+    var self = this; this.clearTimer();
+    this.timer = setTimeout(function () { if (self.gen === g) self.runScImage(g); }, Math.max(4000, settings.intervalMs || 500));
   };
 
   /* ---- картинка Chaturbate: фиксированная частота опроса jpeg.live (~2+/сек) ---- */
