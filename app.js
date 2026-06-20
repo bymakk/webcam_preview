@@ -35,6 +35,7 @@
   var dragId = null;
   var ctxModelId = null;
   var editingId = null;           // null => режим добавления
+  var audioTileId = null;         // плитка, у которой включён звук (остальные muted)
 
   /* =======================================================================
    *  Хранилище
@@ -264,7 +265,9 @@
     }
     this.media.innerHTML = '';
     var video = document.createElement('video');
-    video.muted = true; video.autoplay = true; video.playsInline = true;
+    // muted по умолчанию (нужно для автозапуска); звук — только у выбранной плитки
+    video.muted = (audioTileId !== this.model.id);
+    video.autoplay = true; video.playsInline = true;
     video.setAttribute('playsinline', ''); video.draggable = false;
     video.addEventListener('canplay', function () { video.play().catch(function () {}); });
     this.media.appendChild(video);
@@ -402,6 +405,8 @@
     open: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/>',
     left: '<path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/>',
     right:'<path d="M5 12h14"/><path d="M12 5l7 7-7 7"/>',
+    sound:'<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/>',
+    mute: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" y1="9" x2="16" y2="15"/><line x1="16" y1="9" x2="22" y2="15"/>',
     trash:'<path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'
   };
 
@@ -462,6 +467,15 @@
     var modeEl = $('.badge.mode', entry.el); // только индикатор режима (видео/фото)
     modeEl.innerHTML = (m.mode === 'video' ? svg(ICON.video) + 'Видео' : svg(ICON.img) + 'Фото');
     modeEl.style.gap = '5px';
+    // звуковой бейдж — только у видео (клик по плитке вкл/выкл звук)
+    var sb = $('.badge.sound', entry.el);
+    if (m.mode === 'video') {
+      if (!sb) { sb = div('badge sound'); $('.tile-top', entry.el).appendChild(sb); }
+      var on = audioTileId === m.id;
+      sb.classList.toggle('on', on);
+      sb.innerHTML = on ? svg(ICON.sound) + 'Звук' : svg(ICON.mute);
+      sb.style.gap = '5px';
+    } else if (sb) { sb.remove(); }
   }
 
   function buildOverlay(entry, m) {
@@ -552,10 +566,12 @@
       openContextMenu(id, e.clientX, e.clientY);
     });
 
-    // кнопка-карандаш в оверлее
+    // клик: карандаш -> редактирование; иначе по видео-плитке -> вкл/выкл звук
     el.addEventListener('click', function (e) {
       var btn = e.target.closest('[data-act="edit"]');
-      if (btn) { e.preventDefault(); openModal(id); }
+      if (btn) { e.preventDefault(); openModal(id); return; }
+      if (e.target.closest('.login-link')) return; // не перехватываем ссылки
+      toggleAudioTile(id);
     });
 
     // клавиатура: ContextMenu / Shift+F10 / Enter — открыть меню у плитки
@@ -612,6 +628,13 @@
       items.push({ label: 'Режим', header: true });
       items.push({ icon: ICON.img, label: 'Картинка (CB)', check: m.mode === 'image', act: function () { setMode(id, 'image'); } });
       items.push({ icon: ICON.video, label: 'Видео (SC)', check: m.mode === 'video', act: function () { setMode(id, 'video'); } });
+      items.push({ sep: true });
+    }
+
+    if (m.mode === 'video') {
+      var soundOn = audioTileId === id;
+      items.push({ icon: soundOn ? ICON.mute : ICON.sound, label: soundOn ? 'Выключить звук' : 'Включить звук',
+        act: function () { toggleAudioTile(id); } });
       items.push({ sep: true });
     }
 
@@ -699,10 +722,26 @@
   function removeModel(id) {
     var i = state.models.findIndex(function (m) { return m.id === id; });
     if (i < 0) return;
+    if (audioTileId === id) audioTileId = null;
     state.models.splice(i, 1);
     save();
     render();
     toast('Модель удалена');
+  }
+
+  // Звук: включаем у одной плитки (клик = жест для снятия mute), остальные глушим.
+  function toggleAudioTile(id) {
+    var m = getModel(id);
+    if (!m || m.mode !== 'video') return;       // звук только у видео
+    audioTileId = (audioTileId === id) ? null : id;
+    applyAudio();
+  }
+  function applyAudio() {
+    tiles.forEach(function (entry, tid) {
+      var v = entry.el.querySelector('video');
+      if (v) v.muted = (tid !== audioTileId);
+      buildBadges(entry, entry.ctrl.model);     // обновить бейдж звука
+    });
   }
 
   /* =======================================================================
