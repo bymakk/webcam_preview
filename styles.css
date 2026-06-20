@@ -162,6 +162,8 @@ input[type=range] { accent-color: var(--accent); cursor: pointer; }
   background: rgba(0, 0, 0, .55); backdrop-filter: blur(4px);
   color: #fff; border: 1px solid rgba(255, 255, 255, .12);
 }
+.badge.sound { pointer-events: auto; cursor: pointer; }
+.badge.sound:hover { border-color: rgba(255, 255, 255, .4); }
 .badge.sound.on { background: var(--accent); border-color: transparent; }
 .badge.mode { text-transform: uppercase; }
 .platform-badge {

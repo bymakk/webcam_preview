@@ -88,25 +88,56 @@
   var scCache = new Map();          // username -> { t, v:{online,id,previewUrl} }
   var mfKeys = null, mfKeysT = 0;   // кэш pkey->pdkey
 
-  // Резолв логин->id. Партнёрский резолвер go.xxxiijmp.com части IP отдаёт 500
-  // (бан сети). Тогда повторяем через публичный CORS-прокси — его IP не забанен.
-  function scFetchModels(username) {
-    var target = SC_RESOLVE + encodeURIComponent(username) + '&strict=1';
-    var urls = [target].concat(SC_PROXIES.map(function (p) { return p + encodeURIComponent(target); }));
-    return (function tryAt(i) {
+  // Пробуем URL по очереди (прямой + публичные CORS-прокси), берём первый рабочий.
+  function scTryJson(urls) {
+    return (function at(i) {
       return fetch(urls[i], { cache: 'no-store' })
         .then(function (r) { if (!r.ok) throw new Error('s ' + r.status); return r.json(); })
-        .catch(function (e) { if (i + 1 < urls.length) return tryAt(i + 1); throw e; });
+        .catch(function (e) { if (i + 1 < urls.length) return at(i + 1); throw e; });
     })(0);
   }
+  // go.xxxiijmp.com (части IP отдаёт 500 -> повторяем через прокси). strict=1 даёт
+  // ТОЛЬКО публичную модель (приват/группа -> пусто).
+  function scFetchModels(username) {
+    var t = SC_RESOLVE + encodeURIComponent(username) + '&strict=1';
+    return scTryJson([t].concat(SC_PROXIES.map(function (p) { return p + encodeURIComponent(t); })));
+  }
+  // cam API даёт ТОЧНЫЙ статус для всех состояний (public/private/group/away).
+  // CORS у Stripchat закрыт -> всегда через прокси.
+  function scFetchCam(username) {
+    var t = 'https://stripchat.com/api/front/v2/models/username/' + encodeURIComponent(username) + '/cam';
+    return scTryJson(SC_PROXIES.map(function (p) { return p + encodeURIComponent(t); }));
+  }
+  function pickPreview(o) { return o.previewUrl || o.snapshotUrl || o.previewUrlThumbBig || null; }
+  function mapScStatus(s) {
+    s = String(s || '').toLowerCase();
+    if (s === 'public') return 'public';
+    if (s === 'groupshow' || s === 'group') return 'group';
+    if (s.indexOf('private') >= 0 || s === 'p2p' || s === 'ticketshow') return 'private';
+    if (s === 'idle' || s === 'away') return 'away';
+    return 'offline';
+  }
+  function camToResult(cd) {
+    var u = ((cd.user || {}).user) || {};
+    if (!u.id) return { state: 'offline', online: false };
+    var st = mapScStatus(u.status);
+    return { state: st, online: st === 'public', id: u.id, previewUrl: pickPreview(u) };
+  }
+  // Возвращает { state:'public'|'private'|'group'|'away'|'offline'|'error', online, id, previewUrl }
   function scResolve(username) {
     var c = scCache.get(username);
-    if (c && Date.now() - c.t < 10000) return Promise.resolve(c.v);
+    if (c && Date.now() - c.t < 8000) return Promise.resolve(c.v);
     return scFetchModels(username).then(function (j) {
       var m = (j.models || [])[0];
-      var v = m
-        ? { online: true, id: m.id, previewUrl: m.previewUrl || m.snapshotUrl || m.previewUrlThumbBig }
-        : { online: false };
+      if (m) return { state: 'public', online: true, id: m.id, previewUrl: pickPreview(m) };
+      return scFetchCam(username).then(camToResult);   // не public -> уточняем статус
+    }, function () {
+      return scFetchCam(username).then(camToResult);    // xxxiijmp недоступен -> cam API
+    }).then(function (v) {
+      scCache.set(username, { t: Date.now(), v: v });
+      return v;
+    }).catch(function () {
+      var v = { state: 'error', online: false };
       scCache.set(username, { t: Date.now(), v: v });
       return v;
     });
@@ -250,13 +281,28 @@
   /* ---- Stripchat видео: свой hls.js плеер ---- */
   Preview.prototype.runScVideo = function (g) {
     var self = this, user = this.user();
-    this.showState('loading');
+    // «Загрузка…» только при первом заходе (когда ничего не показано), а не на
+    // каждой авто-перепроверке — иначе статус мигал бы каждые 15с.
+    if (!this.media.querySelector('video') && this.stateEl.classList.contains('hidden')) this.showState('loading');
     scResolve(user).then(function (d) {
       if (self.gen !== g) return;
-      if (!d.online || !d.id) { self.setLive('offline'); self.showState('offline'); return; }
-      self.setLive('online');
-      getMouflonKeys().then(function (keys) { if (self.gen === g) self.mountHls(g, d.id, keys); });
-    }).catch(function () { if (self.gen === g) { self.setLive('offline'); self.showState('error'); } });
+      if (d.state === 'public' && d.id) {
+        getMouflonKeys().then(function (keys) { if (self.gen === g) self.mountHls(g, d.id, keys); });
+      } else {
+        // приват/группа/отошла/оффлайн — не оффлайн «насовсем»: периодически
+        // перепроверяем, чтобы видео само поднялось, когда модель вернётся в public.
+        self.showState(d.state);
+        self.scRecheck(g);
+      }
+    }).catch(function () {
+      if (self.gen !== g) return;
+      self.showState('error'); self.scRecheck(g);
+    });
+  };
+  // Авто-перепроверка статуса (раз в ~15с), пока видео не играет.
+  Preview.prototype.scRecheck = function (g) {
+    var self = this; this.clearTimer();
+    this.timer = setTimeout(function () { if (self.gen === g) self.runScVideo(g); }, 15000);
   };
   Preview.prototype.mountHls = function (g, id, keys) {
     var self = this;
@@ -300,9 +346,16 @@
     });
     hls.on(window.Hls.Events.ERROR, function (e, data) {
       if (!data || !data.fatal) return;
-      if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) { try { hls.startLoad(); } catch (x) {} }
+      var det = data.details || '';
+      if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
+        // плейлист/мастер не грузится -> стрим, вероятно, закончился (ушла оффлайн/
+        // в приват) -> перерезолвим и покажем актуальный статус с авто-перепроверкой.
+        if (/manifest|level/i.test(det)) {
+          self.destroyHls(); if (self.gen === g) self.runScVideo(g);
+        } else { try { hls.startLoad(); } catch (x) {} } // сегмент -> просто продолжаем
+      }
       else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) { try { hls.recoverMediaError(); } catch (x) {} }
-      else { self.destroyHls(); if (self.gen === g) { self.setNote('видео недоступно — картинка'); self.runScImage(g); } }
+      else { self.destroyHls(); if (self.gen === g) self.runScVideo(g); }
     });
   };
 
@@ -381,7 +434,10 @@
     var map = {
       loading: { html: '<div class="spinner"></div><span>Загрузка…</span>' },
       offline: { html: '<div class="state-emoji">🌙</div><span>Не в эфире</span>' },
-      error:   { html: '<div class="state-emoji">⚠️</div><span>Ошибка загрузки</span>' },
+      private: { html: '<div class="state-emoji">🔒</div><span>В приватном</span>' },
+      group:   { html: '<div class="state-emoji">👥</div><span>Групповое шоу</span>' },
+      away:    { html: '<div class="state-emoji">☕</div><span>Отошла</span>' },
+      error:   { html: '<div class="state-emoji">🔄</div><span>Проверяю…</span>' },
       noimg:   { html: '<div class="state-emoji">🖼️</div><span>Нет превью</span>' },
     };
     var s = map[kind] || map.error;
@@ -467,10 +523,15 @@
     var modeEl = $('.badge.mode', entry.el); // только индикатор режима (видео/фото)
     modeEl.innerHTML = (m.mode === 'video' ? svg(ICON.video) + 'Видео' : svg(ICON.img) + 'Фото');
     modeEl.style.gap = '5px';
-    // звуковой бейдж — только у видео (клик по плитке вкл/выкл звук)
+    // кликабельная иконка звука — только у видео (вкл/выкл звук этой плитки)
     var sb = $('.badge.sound', entry.el);
     if (m.mode === 'video') {
-      if (!sb) { sb = div('badge sound'); $('.tile-top', entry.el).appendChild(sb); }
+      if (!sb) {
+        sb = div('badge sound');
+        sb.title = 'Звук (только эта плитка)';
+        sb.addEventListener('click', function (e) { e.stopPropagation(); toggleAudioTile(entry.ctrl.model.id); });
+        $('.tile-top', entry.el).appendChild(sb);
+      }
       var on = audioTileId === m.id;
       sb.classList.toggle('on', on);
       sb.innerHTML = on ? svg(ICON.sound) + 'Звук' : svg(ICON.mute);
