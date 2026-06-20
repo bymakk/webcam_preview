@@ -33,6 +33,7 @@
   var settings = state.settings;
   var tiles = new Map();          // id -> { el, ctrl, sig }
   var dragId = null;
+  var volumeDragging = false;     // зажат ползунок громкости => плитки не таскаем
   var ctxModelId = null;
   var editingId = null;           // null => режим добавления
   var audioTileId = null;         // плитка, у которой включён звук (остальные muted)
@@ -549,6 +550,22 @@
         ['mousedown', 'pointerdown', 'click', 'dblclick'].forEach(function (ev) {
           vbar.addEventListener(ev, function (e) { e.stopPropagation(); });
         });
+        // Пока тянем тумблер, плитку перетаскивать нельзя: при движении вниз курсор
+        // уходит на тело плитки и нативный drag стартовал бы уже оттуда (мимо guard
+        // в dragstart). Снимаем draggable на всё время жеста и возвращаем по отпусканию.
+        vbar.addEventListener('pointerdown', function () {
+          var tile = entry.el;
+          tile.draggable = false;
+          volumeDragging = true;
+          var restore = function () {
+            tile.draggable = true;
+            volumeDragging = false;
+            document.removeEventListener('pointerup', restore, true);
+            document.removeEventListener('pointercancel', restore, true);
+          };
+          document.addEventListener('pointerup', restore, true);
+          document.addEventListener('pointercancel', restore, true);
+        });
         vol.addEventListener('input', function (e) {
           e.stopPropagation();
           settings.volume = (parseInt(vol.value, 10) || 0) / 100;
@@ -619,8 +636,9 @@
    * ==================================================================== */
   function wireTileEvents(el, id) {
     el.addEventListener('dragstart', function (e) {
-      // качелька громкости не должна таскать плитку (нативный drag отменяем)
-      if (e.target.closest('.volume-bar')) { e.preventDefault(); return; }
+      // качелька громкости не должна таскать плитку — ни стартуя на ней, ни когда
+      // тумблер уехал вниз на тело плитки (тогда target — медиа, ловим по флагу).
+      if (volumeDragging || e.target.closest('.volume-bar')) { e.preventDefault(); return; }
       dragId = id;
       el.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
