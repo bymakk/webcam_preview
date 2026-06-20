@@ -16,7 +16,7 @@
   var CB_VIDEO_INTERVAL_MS = 150;   // «видео» Chaturbate = частый опрос кадров (~6-7 fps)
 
   var DEFAULTS = {
-    settings: { cols: 4, intervalMs: 500, defaultMode: 'image' },
+    settings: { cols: 4, intervalMs: 500, defaultMode: 'image', volume: 1 },
     models: []
   };
 
@@ -313,6 +313,7 @@
     var video = document.createElement('video');
     // muted по умолчанию (нужно для автозапуска); звук — только у выбранной плитки
     video.muted = (audioTileId !== this.model.id);
+    video.volume = (settings.volume != null ? settings.volume : 1);
     video.autoplay = true; video.playsInline = true;
     video.setAttribute('playsinline', ''); video.draggable = false;
     video.addEventListener('canplay', function () { video.play().catch(function () {}); });
@@ -503,7 +504,8 @@
         '<div class="overlay-actions">' +
           '<button class="overlay-btn" data-act="edit" title="Редактировать">' + svg(ICON.edit) + '</button>' +
         '</div>' +
-      '</div>';
+      '</div>' +
+      '<div class="volume-bar"><input type="range" class="vol" min="0" max="100" step="1" title="Громкость (общая)"></div>';
 
     var refs = {
       media: $('.tile-media', el),
@@ -511,6 +513,18 @@
     };
     var ctrl = new Preview(m, refs);
     var entry = { el: el, ctrl: ctrl, sig: sigOf(m) };
+
+    // ползунок громкости — общий для всех плиток (settings.volume)
+    var vol = $('.vol', el);
+    vol.value = Math.round((settings.volume != null ? settings.volume : 1) * 100);
+    $('.volume-bar', el).addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    $('.volume-bar', el).addEventListener('click', function (e) { e.stopPropagation(); });
+    vol.addEventListener('input', function (e) {
+      e.stopPropagation();
+      settings.volume = (parseInt(vol.value, 10) || 0) / 100;
+      save();
+      applyAudio();
+    });
 
     wireTileEvents(el, m.id);
     buildBadges(entry, m);
@@ -522,7 +536,6 @@
   function buildBadges(entry, m) {
     var modeEl = $('.badge.mode', entry.el); // только индикатор режима (видео/фото)
     modeEl.innerHTML = (m.mode === 'video' ? svg(ICON.video) + 'Видео' : svg(ICON.img) + 'Фото');
-    modeEl.style.gap = '5px';
     // кликабельная иконка звука — только у видео (вкл/выкл звук этой плитки)
     var sb = $('.badge.sound', entry.el);
     if (m.mode === 'video') {
@@ -535,7 +548,6 @@
       var on = audioTileId === m.id;
       sb.classList.toggle('on', on);
       sb.innerHTML = on ? svg(ICON.sound) + 'Звук' : svg(ICON.mute);
-      sb.style.gap = '5px';
     } else if (sb) { sb.remove(); }
   }
 
@@ -798,10 +810,15 @@
     applyAudio();
   }
   function applyAudio() {
+    var vol = settings.volume != null ? settings.volume : 1;
     tiles.forEach(function (entry, tid) {
+      var on = tid === audioTileId;
       var v = entry.el.querySelector('video');
-      if (v) v.muted = (tid !== audioTileId);
-      buildBadges(entry, entry.ctrl.model);     // обновить бейдж звука
+      if (v) { v.muted = !on; if (on) v.volume = vol; }
+      entry.el.classList.toggle('audio-on', on);     // показывает ползунок громкости
+      var slider = entry.el.querySelector('.vol');
+      if (slider) slider.value = Math.round(vol * 100);
+      buildBadges(entry, entry.ctrl.model);          // обновить иконку звука
     });
   }
 

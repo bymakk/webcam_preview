@@ -116,6 +116,7 @@ input[type=range] { accent-color: var(--accent); cursor: pointer; }
   overflow: hidden;
   cursor: grab;
   transition: box-shadow .15s, transform .12s, opacity .12s;
+  container-type: inline-size;   /* бейджи/кнопки масштабируем под ширину плитки */
 }
 .tile:hover { box-shadow: inset 0 0 0 2px #3a3f4a; z-index: 1; }
 .tile.dragging { opacity: .35; cursor: grabbing; }
@@ -137,35 +138,53 @@ input[type=range] { accent-color: var(--accent); cursor: pointer; }
 /* Status / loading layers */
 .tile-state {
   position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 8px;
+  align-items: center; justify-content: center; gap: clamp(3px, 1.5cqw, 8px);
   color: var(--text-faint); background: var(--bg-elev);
-  text-align: center; padding: 12px; z-index: 1;
+  text-align: center; padding: clamp(4px, 2cqw, 12px); z-index: 1;
+  font-size: clamp(9px, 3.4cqw, 14px);
 }
 .tile-state .spinner {
-  width: 26px; height: 26px; border-radius: 50%;
+  width: clamp(16px, 7cqw, 26px); height: clamp(16px, 7cqw, 26px); border-radius: 50%;
   border: 3px solid var(--line); border-top-color: var(--accent);
   animation: spin .8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .tile-state.hidden { display: none; }
-.tile-state .state-emoji { font-size: 26px; }
+.tile-state .state-emoji { font-size: clamp(16px, 8cqw, 26px); }
 
-/* Top badge (только режим: видео/фото) */
+/* Top badge (только режим: видео/фото) — масштабируется под ширину плитки (cqw) */
 .tile-top {
-  position: absolute; top: 8px; left: 8px; right: 8px; z-index: 3;
-  display: flex; align-items: center; gap: 6px; pointer-events: none;
+  position: absolute; z-index: 3; pointer-events: none;
+  top: clamp(3px, 1.6cqw, 8px); left: clamp(3px, 1.6cqw, 8px); right: clamp(3px, 1.6cqw, 8px);
+  display: flex; align-items: center; gap: clamp(3px, 1cqw, 6px);
 }
 .badge {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11px; font-weight: 700; letter-spacing: .3px;
-  padding: 3px 8px; border-radius: 7px;
+  display: inline-flex; align-items: center; gap: clamp(2px, .8cqw, 5px);
+  font-size: clamp(7px, 2.5cqw, 11px); font-weight: 700; letter-spacing: .3px;
+  padding: clamp(1px, .5cqw, 3px) clamp(3px, 1.5cqw, 8px);
+  border-radius: clamp(4px, 1.4cqw, 7px); line-height: 1; white-space: nowrap;
   background: rgba(0, 0, 0, .55); backdrop-filter: blur(4px);
   color: #fff; border: 1px solid rgba(255, 255, 255, .12);
 }
+.badge .icon { width: clamp(10px, 3.4cqw, 16px); height: clamp(10px, 3.4cqw, 16px); }
+/* очень узкие плитки — оставляем только иконку (текст скрываем) */
+@container (max-width: 150px) { .badge { font-size: 0; gap: 0; padding: clamp(2px,2cqw,4px); } }
 .badge.sound { pointer-events: auto; cursor: pointer; }
 .badge.sound:hover { border-color: rgba(255, 255, 255, .4); }
 .badge.sound.on { background: var(--accent); border-color: transparent; }
 .badge.mode { text-transform: uppercase; }
+
+/* Регулятор громкости (общий для всех плиток) — выезжает снизу при наведении,
+   только у плитки со звуком */
+.volume-bar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 5;
+  padding: 10px 12px 8px;
+  background: linear-gradient(to top, rgba(0, 0, 0, .85), transparent);
+  transform: translateY(100%); opacity: 0; transition: transform .15s, opacity .15s;
+  pointer-events: none;
+}
+.tile.audio-on:hover .volume-bar { transform: none; opacity: 1; pointer-events: auto; }
+.volume-bar input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; display: block; }
 .platform-badge {
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 10px; font-weight: 800; letter-spacing: .4px;
