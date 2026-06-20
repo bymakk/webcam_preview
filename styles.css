@@ -169,22 +169,44 @@ input[type=range] { accent-color: var(--accent); cursor: pointer; }
 .badge .icon { width: clamp(10px, 3.4cqw, 16px); height: clamp(10px, 3.4cqw, 16px); }
 /* очень узкие плитки — оставляем только иконку (текст скрываем) */
 @container (max-width: 150px) { .badge { font-size: 0; gap: 0; padding: clamp(2px,2cqw,4px); } }
-.badge.sound { pointer-events: auto; cursor: pointer; }
+.badge.sound { position: relative; pointer-events: auto; cursor: pointer; }
 .badge.sound:hover { border-color: rgba(255, 255, 255, .4); }
 .badge.sound.on { background: var(--accent); border-color: transparent; }
+.badge.sound .sound-inner { display: inline-flex; align-items: center; gap: inherit; }
 .badge.mode { text-transform: uppercase; }
 
-/* Регулятор громкости (общий для всех плиток) — выезжает снизу при наведении,
-   только у плитки со звуком */
+/* Громкость (общая) — ВЕРТИКАЛЬНАЯ качелька, выезжает ВНИЗ из-под кнопки «Звук».
+   Появляется только когда звук включён и курсор на кнопке/качельке. */
 .volume-bar {
-  position: absolute; left: 0; right: 0; bottom: 0; z-index: 5;
-  padding: 10px 12px 8px;
-  background: linear-gradient(to top, rgba(0, 0, 0, .85), transparent);
-  transform: translateY(100%); opacity: 0; transition: transform .15s, opacity .15s;
+  position: absolute; top: 100%; left: 50%; z-index: 6;
+  transform: translateX(-50%) scaleY(0); transform-origin: top center;
+  padding: clamp(6px, 2.6cqw, 11px) clamp(3px, 1.6cqw, 6px) clamp(5px, 2.2cqw, 9px);
+  border-radius: clamp(5px, 1.6cqw, 9px);
+  background: rgba(0, 0, 0, .82); backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, .15);
+  opacity: 0; transition: transform .14s ease, opacity .14s ease;
   pointer-events: none;
 }
-.tile.audio-on:hover .volume-bar { transform: none; opacity: 1; pointer-events: auto; }
-.volume-bar input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; display: block; }
+.badge.sound.on:hover .volume-bar,
+.badge.sound.on:focus-within .volume-bar,
+.badge.sound.on .volume-bar:hover {
+  transform: translateX(-50%) scaleY(1); opacity: 1; pointer-events: auto;
+}
+/* На сенсорных устройствах нет :hover — показываем качельку постоянно,
+   пока звук включён, иначе её было бы не открыть. */
+@media (hover: none) {
+  .badge.sound.on .volume-bar {
+    transform: translateX(-50%) scaleY(1); opacity: 1; pointer-events: auto;
+  }
+}
+.volume-bar input[type=range] {
+  writing-mode: vertical-lr; direction: rtl;   /* вертикально, максимум — сверху (совр. браузеры) */
+  -webkit-appearance: slider-vertical;         /* Safari < 17.4 / старый Chrome — иначе горизонтально */
+  appearance: slider-vertical;
+  width: clamp(10px, 3cqw, 16px);
+  height: clamp(56px, 26cqw, 104px);
+  accent-color: var(--accent); cursor: pointer; margin: 0; display: block;
+}
 .platform-badge {
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 10px; font-weight: 800; letter-spacing: .4px;

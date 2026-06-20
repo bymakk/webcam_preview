@@ -504,8 +504,7 @@
         '<div class="overlay-actions">' +
           '<button class="overlay-btn" data-act="edit" title="Редактировать">' + svg(ICON.edit) + '</button>' +
         '</div>' +
-      '</div>' +
-      '<div class="volume-bar"><input type="range" class="vol" min="0" max="100" step="1" title="Громкость (общая)"></div>';
+      '</div>';
 
     var refs = {
       media: $('.tile-media', el),
@@ -513,18 +512,6 @@
     };
     var ctrl = new Preview(m, refs);
     var entry = { el: el, ctrl: ctrl, sig: sigOf(m) };
-
-    // ползунок громкости — общий для всех плиток (settings.volume)
-    var vol = $('.vol', el);
-    vol.value = Math.round((settings.volume != null ? settings.volume : 1) * 100);
-    $('.volume-bar', el).addEventListener('mousedown', function (e) { e.stopPropagation(); });
-    $('.volume-bar', el).addEventListener('click', function (e) { e.stopPropagation(); });
-    vol.addEventListener('input', function (e) {
-      e.stopPropagation();
-      settings.volume = (parseInt(vol.value, 10) || 0) / 100;
-      save();
-      applyAudio();
-    });
 
     wireTileEvents(el, m.id);
     buildBadges(entry, m);
@@ -542,12 +529,37 @@
       if (!sb) {
         sb = div('badge sound');
         sb.title = 'Звук (только эта плитка)';
-        sb.addEventListener('click', function (e) { e.stopPropagation(); toggleAudioTile(entry.ctrl.model.id); });
+        sb.draggable = false;
+        // .sound-inner — иконка+текст (обновляется), .volume-bar — вертикальная
+        // качелька громкости, выезжает ВНИЗ из-под кнопки. Громкость общая.
+        sb.innerHTML =
+          '<span class="sound-inner"></span>' +
+          '<div class="volume-bar" draggable="false">' +
+            '<input type="range" class="vol" min="0" max="100" step="1" ' +
+            'title="Громкость (общая)" aria-label="Громкость" draggable="false"></div>';
+        sb.addEventListener('click', function (e) {
+          if (e.target.closest('.volume-bar')) return;   // клик по качельке не переключает звук
+          e.stopPropagation();
+          toggleAudioTile(entry.ctrl.model.id);
+        });
+        var vbar = $('.volume-bar', sb);
+        var vol = $('.vol', sb);
+        vol.value = Math.round((settings.volume != null ? settings.volume : 1) * 100);
+        // взаимодействие с качелькой не должно булькать к плитке (звук/перетаскивание)
+        ['mousedown', 'pointerdown', 'click', 'dblclick'].forEach(function (ev) {
+          vbar.addEventListener(ev, function (e) { e.stopPropagation(); });
+        });
+        vol.addEventListener('input', function (e) {
+          e.stopPropagation();
+          settings.volume = (parseInt(vol.value, 10) || 0) / 100;
+          save();
+          applyAudio();
+        });
         $('.tile-top', entry.el).appendChild(sb);
       }
       var on = audioTileId === m.id;
       sb.classList.toggle('on', on);
-      sb.innerHTML = on ? svg(ICON.sound) + 'Звук' : svg(ICON.mute);
+      $('.sound-inner', sb).innerHTML = on ? svg(ICON.sound) + 'Звук' : svg(ICON.mute);
     } else if (sb) { sb.remove(); }
   }
 
@@ -607,6 +619,8 @@
    * ==================================================================== */
   function wireTileEvents(el, id) {
     el.addEventListener('dragstart', function (e) {
+      // качелька громкости не должна таскать плитку (нативный drag отменяем)
+      if (e.target.closest('.volume-bar')) { e.preventDefault(); return; }
       dragId = id;
       el.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
@@ -815,7 +829,6 @@
       var on = tid === audioTileId;
       var v = entry.el.querySelector('video');
       if (v) { v.muted = !on; if (on) v.volume = vol; }
-      entry.el.classList.toggle('audio-on', on);     // показывает ползунок громкости
       var slider = entry.el.querySelector('.vol');
       if (slider) slider.value = Math.round(vol * 100);
       buildBadges(entry, entry.ctrl.model);          // обновить иконку звука
