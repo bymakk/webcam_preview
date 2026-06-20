@@ -81,7 +81,7 @@
   var SC_RESOLVE = 'https://go.xxxiijmp.com/api/models?modelsList=';
   // Публичные CORS-прокси: пробуем по очереди, если прямой резолвер забанил IP.
   var SC_PROXIES = ['https://corsproxy.io/?url=', 'https://api.allorigins.win/raw?url='];
-  var SC_MASTER = 'https://edge-hls.doppiocdn.com/hls/'; // + {id}/master/{id}.m3u8
+  var SC_MASTER = 'https://edge-hls.doppiocdn.com/hls/'; // + {id}/master/{id}_auto.m3u8
   var SC_KEYS_URL = 'https://raw.githubusercontent.com/kesamom/stripchat_mouflon/main/stripchat_mouflon_keys.json';
 
   var scCache = new Map();          // username -> { t, v:{online,id,previewUrl} }
@@ -287,7 +287,10 @@
       fragLoadingMaxRetry: 6
     });
     this.hls = hls;
-    hls.loadSource(SC_MASTER + id + '/master/' + id + '.m3u8');
+    // _auto = ABR-лестница транскодированных пресетов (1080p/720p/480p/240p),
+    // а не сырой «source» (он у части моделей нестабилен -> дёрганье). hls.js
+    // с capLevelToPlayerSize выберет качество под размер плитки.
+    hls.loadSource(SC_MASTER + id + '/master/' + id + '_auto.m3u8');
     hls.attachMedia(video);
     hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
       if (self.gen === g) { self.hideState(); video.play().catch(function () {}); }
